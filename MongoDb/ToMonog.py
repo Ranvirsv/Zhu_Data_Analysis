@@ -6,10 +6,10 @@ from configparser import ConfigParser
 config = ConfigParser()
 config.read("./config.ini")
 DataBase = config["DataBase"]
-Pass = DataBase["PASS"]
+password = DataBase["PASS"]
 DB_Name = DataBase["DBNAME"]
 DB_Collection = DataBase["DBCOLLECTION"]
-Data_dir = "../Data"
+Data_dir = "../Data/alljobs"
 
 
 def get_database():
@@ -22,6 +22,17 @@ def get_database():
     return client[DB_Name]
 
 
+def safe_read(file_path):
+    """Attempt to read a file in text mode with UTF-8 encoding, falling back to binary mode."""
+    try:
+        with open(file_path, 'r', encoding='utf-8') as file:
+            return file.read()
+    except UnicodeDecodeError:
+        # File is not UTF-8 encoded text, read as binary
+        with open(file_path, 'rb') as file:
+            return file.read()  # Returns bytes
+
+
 def add_data(database):
     collection = database[DB_Collection]
     for job_folder in os.listdir(Data_dir):
@@ -29,13 +40,15 @@ def add_data(database):
         if os.path.isdir(job_path):
             job_data = {"job_id": job_folder, "files": []}
         for file_name in os.listdir(job_path):
-            if re.match(r"^(job|Beerling)", file_name):
+            if not re.match(r"^(job|Beerling)", file_name):
                 continue
             file_path = os.path.join(job_path, file_name)
-            with open(file_path, "r") as file:
-                content = file.read()
-                job_data["files"].append(
-                    {"file": file_name, "content": content})
+            content = safe_read(file_path)
+            job_data['files'].append({
+                'file_name': file_name,
+                'content': content if isinstance(content, str) else "Binary file skipped"
+            })
+
         collection.insert_one(job_data)
 
 
