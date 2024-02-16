@@ -1,3 +1,0 @@
-"0","pair.data <- phy_groups_total_capture |>"
-"0","  select(c(""Total_CO2_capture"", ""year"", ""Solution"", ""temp"", ""shifts""))"
-"0","ggpairs(pair.data)"
