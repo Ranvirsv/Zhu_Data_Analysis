@@ -1,8 +1,13 @@
+import os
 from pymongo import MongoClient
 from configparser import ConfigParser
 
 config = ConfigParser()
-password = config['PASSWORD']['PASS']
+config.read('./config.ini')
+DataBase = config['DataBase']
+Pass = DataBase['PASS']
+DB_Name = DataBase['DBNAME']
+DB_Collection = DataBase['DBCOLLECTION']
 
 
 def get_database():
@@ -17,6 +22,12 @@ def get_database():
 
 
 def add_data(database):
+    # TODO: write a function to get the data from Data folder and store it in a stucture
+    pass
+
+
+def convert_to_json(data):
+    # TODO: Function to convert the data(Probably from Pandas Dataframe) to JSON format
     pass
 
 
