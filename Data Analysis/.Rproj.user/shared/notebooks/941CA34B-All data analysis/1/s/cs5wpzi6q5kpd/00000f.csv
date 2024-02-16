@@ -1,0 +1,8 @@
+"0","clusters <- kmeans(data_for_clustering, centers = 6)"
+"0",""
+"0","kmean_total_caputer.revised <- total_capture %>%"
+"0","  mutate(group = as.factor(clusters$cluster[match(file_id, data_for_clustering$file_id)]))"
+"0",""
+"0","group_mean <- kmean_total_caputer.revised |>"
+"0","  group_by(year, group) |>"
+"0","  summarize(mean_CO2 = mean(Total_CO2_capture, na.rm = TRUE), .groups = 'drop')"

@@ -1,0 +1,7 @@
+"0","elbow_plot <- data.frame(k = 1:10, wcss = wcss)"
+"0","ggplot(elbow_plot, aes(x = k, y = wcss), bins = 10) + "
+"0","  geom_point() + "
+"0","  geom_line() + "
+"0","  labs(title = ""Elbow Method for  Optimal k"", "
+"0","       x = ""Number of clusters (k)"", "
+"0","       y = ""Total Within-Cluster Sum of Squares (WCSS)"")"

@@ -1,0 +1,5 @@
+"0","data.clean <- data |>"
+"0","  dplyr::filter(state == ""transp"") |>"
+"0","  dplyr::mutate(year = time/(3600*24*365)) |>"
+"0","  # rename(""C(4)"" = ""C.4."") |>"
+"0","  dplyr::select(c('soln', 'Calcite', 'Sr', 'C(4)', 'year')) "

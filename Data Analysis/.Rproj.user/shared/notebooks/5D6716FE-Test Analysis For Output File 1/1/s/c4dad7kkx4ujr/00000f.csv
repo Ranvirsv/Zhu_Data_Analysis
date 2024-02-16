@@ -1,0 +1,9 @@
+"0","data <- read_tsv(""../Data/200227 run bas1 cvode mod-hfo-corg-ix-calcite.tsv"")"
+"2","[1mRows: [22m[34m4218[39m [1mColumns: [22m[34m93[39m"
+"2","[36m──[39m [1mColumn specification[22m [36m────────────────────────────────────────────────────────────────────────────────────────────────────[39m
+[1mDelimiter:[22m ""\t""
+[31mchr[39m  (1): state
+[32mdbl[39m (92): sim, soln, dist_x, time, step, pH, pe, N, Na, Ca, Mg, K, Al, Si, Fe, Mn, Sr, Ba, P, C(4), Hfo_s, Hfo_w, m_CaX2..."
+"2","
+[36mℹ[39m Use `spec()` to retrieve the full column specification for this data.
+[36mℹ[39m Specify the column types or set `show_col_types = FALSE` to quiet this message."
