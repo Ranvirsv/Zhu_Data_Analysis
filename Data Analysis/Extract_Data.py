@@ -3,6 +3,7 @@ import numpy as np
 import os
 import glob
 from concurrent.futures import ProcessPoolExecutor
+import concurrent
 
 
 def process_file(file_path, file_id):
@@ -37,22 +38,23 @@ def process_all_files(base_path):
     all_data = pd.DataFrame()
 
     with ProcessPoolExecutor() as executor:
-        results = []
+        futures = []
         file_id = 1
         for folder in folders:
             file_paths = glob.glob(os.path.join(folder, "*.out"))
             for file_path in file_paths:
-                results.append(executor.submit(
+                futures.append(executor.submit(
                     process_file, file_path, file_id))
                 file_id += 1
 
-        for future in concurrent.futures.as_completed(results):
+        for future in futures:
             all_data = pd.concat(
                 [all_data, future.result()], ignore_index=True)
 
     return all_data
 
 
-base_path = ""  # Get the path for data
-all_data = process_all_files(base_path)
-all_data.to_csv("all_data_6930.csv", index=False)
+if __name__ == '__main__':
+    base_path = "../Data/alljobs"
+    all_data = process_all_files(base_path)
+    all_data.to_csv("../Data/all_data.csv", index=False)
