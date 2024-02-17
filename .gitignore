@@ -1,10 +1,10 @@
 # Data Folder/Files
 /Data
-.csv
-.xlsx
+*.csv
+*.xlsx
 
 # Config files
-.ini
+*.ini
 
 # misc
 
