@@ -1,3 +1,0 @@
-"0","wcss <- sapply(1:10, function(k){"
-"0","  kmeans(data_for_clustering, centers = k)$tot.withinss"
-"0","})"
