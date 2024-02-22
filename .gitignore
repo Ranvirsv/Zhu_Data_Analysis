@@ -8,3 +8,5 @@
 
 # misc
 
+.Rproj.user
+*.RData
