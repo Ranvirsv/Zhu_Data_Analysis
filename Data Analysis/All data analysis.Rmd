@@ -22,71 +22,48 @@ library(patchwork)
 library(gridExtra)
 ```
 
-## Loading and joining the data
-
-Since we have our data in 126 different files, we will be joining it in
-one csv and pre-processing the data to work with.
-
-Let's have a **process_file** function that takes the file and file_id
-as inputs and returns data after doing the following conversions for
-us:\newline - Set's file_number for each file \newline - Convert the
-time from seconds to year \newline - Convert the calcite to avg_calcite
-(Averaging out the calcite values for first where value for soln is
-between 1 to 10) \newline - Convert the values mole/liter to ton CO2/Ha
-\newline
+## Loading data
 
 ```{r, echo = TRUE}
-# Create a funtion to prepocess and join all the files
-process_file <- function(file, file_id){
-  file_number <- str_extract(file, "(?<=/)[^/]+(?=\\.out$)") # Extracting the file number
-  data <- read.table(file, header = TRUE) |>
-    filter(state == "transp") |> # Get the files which have state as transp
-    mutate(year = time/(3600*24*365)) |> # Convert form sec to year
-    rename(`C(4)` = "C.4.") |>
-    select(c('soln', 'Calcite', 'Sr', 'C(4)', 'year')) |>
-    group_by(year) |>
-    mutate(avg_calcite = ifelse(soln %in% 1:10, mean(Calcite[soln %in% 1:10]), Calcite)) |> # Getting the average value for Calcite
-    ungroup() |>
-    # Conversions from mole/liter to CO2/Ha
-    mutate(Calcite = avg_calcite,
-           Calcite = Calcite * 500000 * 44 / 1000000 / ifelse(soln %in% 1:10, 1, 10),
-           `C(4)` = `C(4)` * 500000 * 44 / 1000000 / 10,
-           file_id = file_id) |>
-    select(-avg_calcite)
-  return(data)
-}
+# So let's get the data where the soln value is 11
+# We remove the Sr column as we do not need the Sr data for total CO2 caputre data. 
+all_data <- read.csv("../Data/all_data.csv", header = TRUE)
+
+## The 7000 file csv requires some more cleaning
+all_data = all_data |>
+  rename(`C(4)` = "C.4.") |>
+  dplyr::select(-"X")
 ```
 
-\newpage
+## EDA
 
-Now that we have this function to process the files, let's read and
-combine all the files we have
+```{r}
+head(all_data)
+```
 
-```{r, echo = TRUE}
-# Seting the base path for alljobs directory 
-base_path <- "../Data/alljobs" 
-
-# Getting all the simulation folders from the base directory 
-folders <- list.dirs(path = base_path, full.names = TRUE, recursive = FALSE)
-
-all_data <- list()
-
-file_counter <- 1
-
-for (folder in folders) {
-  # Adjust the pattern to match your .out files, if they have a specific naming convention
-  file_paths <- list.files(path = folder, full.names = TRUE, pattern = "*.out$")
-  data <- process_file(file_paths, file_counter)
-  all_data <- bind_rows(all_data, data)
-  file_counter <- file_counter + 1
-}
-
+```{r, echo=FALSE}
+cat(
+  "Total rows:", 
+  nrow(all_data),
+  "\n"
+)
+completed_sim <- all_data[all_data$year >= 5, ]
+cat(
+  "Number of simulations that ran for all 5 years:", 
+  nrow(completed_sim),
+  "\n"
+)
+four_year_sim <- all_data[all_data$year >=4, ]
+cat(
+  "Number of simulations that ran for over 4 years:",
+  nrow(four_year_sim),
+  "\n"
+)
 ```
 
 ```{r}
-write.csv(all_data, "./all_data.csv")
+incomplete_data <- all_data[all_data$year < 4, ]
 ```
-
 
 ## Get the data for Total CO2 Capture
 
@@ -95,20 +72,17 @@ total_capture and the data where the value for soln = 11 \newline The
 Calcite and soln_11_data will help us get the total_capture data
 required for the Total_CO2_Capture graphs.
 
-```{r, echo = TRUE}
-# So let's get the data where the soln value is 11
-# We remove the Sr column as we do not need the Sr data for total CO2 caputre data. 
+```{r}
 soln_11_data <- all_data |>
   filter(soln == 11) |>
   group_by(file_id)|>
   mutate(`C(4)` = cumsum(`C(4)`)) |>
   ungroup()|>
-  dplyr::select(-"Sr") 
+  dplyr::select(-"Sr")
 
 calcite <- all_data |>
   filter(soln %in% 1:10) |>
   dplyr::select(-"Sr")
-
 
 # Now we can use the claclite and soln_11_data to create the total_capture data that we need to plot for the 126 files.
 total_capture <- full_join(calcite, soln_11_data, by = c("year", "file_id"), suffix = c(".soil", ".effluent")) |>
@@ -117,7 +91,23 @@ total_capture <- full_join(calcite, soln_11_data, by = c("year", "file_id"), suf
   dplyr::select(c(Total_CO2_capture, year, file_id))
 ```
 
+
 ```{r}
+cat(
+  "NA data in csv", 
+  sum(is.na(all_data)),
+  "\n"
+)
+cat(
+  "NA data in Total Capture data",
+  sum(is.na(total_capture)),
+  "\n"
+)
+```
+
+
+```{r}
+## If need drop the na 
 total_capture <- drop_na(total_capture)
 ```
 
@@ -125,10 +115,9 @@ total_capture <- drop_na(total_capture)
 
 ## Plots
 
-Let's take a look at the plot for total co2 capture for the 126 files
-separately.
+Let's take a look at the plot for total co2 capture separately.
 
-```{r, fig.width=12, fig.height= 12}
+```{r, fig.width=22, fig.height= 22}
 p1 <- ggplot(total_capture, aes(x = year, y = Total_CO2_capture, group = file_id, color = as.factor(file_id))) +
   geom_line(show.legend = FALSE) +  # Set show.legend to FALSE to avoid overcrowding with legend
   labs(title = "Total CO2 Capture for Each File Over Time",
@@ -137,15 +126,15 @@ p1 <- ggplot(total_capture, aes(x = year, y = Total_CO2_capture, group = file_id
   theme_minimal() +
   theme(legend.position = "none")  # Remove legend
 
-selected_file_ids <- seq(1, 126, by = 10)
+selected_file_ids <- seq(1, 6930, by = 10)
 
 # Filter the data for the selected file IDs
 selected_data <- total_capture %>%
   filter(file_id %in% selected_file_ids)
 
 # Plotting smoothed lines for selected files
-p2 <- ggplot(selected_data, aes(x = year, y = Total_CO2_capture, group = file_id, color = as.factor(file_id))) +
-  geom_smooth(se = FALSE, method = "loess") +   # Add smoothed trend lines
+p2 <- ggplot(selected_data, aes(x = year, y = Total_CO2_capture, group = file_id)) +
+  geom_smooth(se = FALSE, method = "loess", span = 1) +   # Add smoothed trend lines
   scale_color_viridis_d(option = "C") +          # Use a color scale that prints well in black and white
   labs(title = "Total CO2 Capture Over Time for Selected Files",
        x = "Year",
@@ -154,7 +143,7 @@ p2 <- ggplot(selected_data, aes(x = year, y = Total_CO2_capture, group = file_id
   scale_color_viridis_d() +
   theme_minimal()
 
-p1
+p2
 ```
 
 We can see a trend where the Total CO2 Capture is increasing rapidly for
@@ -426,22 +415,24 @@ final_plot <- wrap_plots(paired_plots, ncol = 2)
 print(final_plot)
 ```
 
-
 \newpage
 
-We can see that although there might be some differences in the grouping number, but mostly the k-means clusters are identical to the ones we get through the physical clustering. 
+We can see that although there might be some differences in the grouping
+number, but mostly the k-means clusters are identical to the ones we get
+through the physical clustering.
 
-Now let's take a look from these clusters what can we predict about the importance of different parameters. And take a look at what are the more important parameters for the prediction of the CO2 absorption levels. 
+Now let's take a look from these clusters what can we predict about the
+importance of different parameters. And take a look at what are the more
+important parameters for the prediction of the CO2 absorption levels.
 
 ```{r}
 write.csv(phy_groups_total_capture, "./phy_groups_total_capture.csv")
 ```
 
-
-## Correlation 
+## Correlation
 
 ```{r fig.width=14, fig.height=12}
-pair.data <- phy_groups_total_capture |>
+pair.data <- kmean_total_caputer |>
   select(c("Total_CO2_capture", "year", "Solution", "temp", "shifts"))
 ggpairs(pair.data)
 ```

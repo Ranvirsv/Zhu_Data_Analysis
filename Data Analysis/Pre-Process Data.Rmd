@@ -1,0 +1,88 @@
+---
+title: "Pre-Process Data"
+output: html_document
+date: "2024-02-21"
+editor_options: 
+  markdown: 
+    wrap: 72
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(stringr)
+```
+
+## Loading and joining the data
+
+Since we have our data in 126 different files, we will be joining it in
+one csv and pre-processing the data to work with.
+
+Let's have a **process_file** function that takes the file and file_id
+as inputs and returns data after doing the following conversions for
+us:\newline - Set's file_number for each file \newline - Convert the
+time from seconds to year \newline - Convert the calcite to avg_calcite
+(Averaging out the calcite values for first where value for soln is
+between 1 to 10) \newline - Convert the values mole/liter to ton CO2/Ha
+\newline
+
+```{r, echo = TRUE}
+# Create a funtion to prepocess and join all the files
+process_file <- function(file, file_id){
+  file_number <- str_extract(file, "(?<=/)[^/]+(?=\\.out$)") # Extracting the file number
+  
+  mineral <- str_extract(file, "(?<=job\\d+_)[A-Za-z]+(?=_\\d+/Beerling_orignal\\.out)")
+  coefficients <- c(0.01, 0.1, 1, 10, 100)
+  
+  coefficient_index <- ((file_id - 1) %% length(coefficients)) + 1
+  coefficient <- coefficients[coefficient_index]
+  
+  data <- read.table(file, header = TRUE) |>
+    filter(state == "transp") |> # Get the files which have state as transp
+    mutate(year = time/(3600*24*365)) |> # Convert form sec to year
+    rename(`C(4)` = "C.4.") |>
+    select(c('soln', 'Calcite', 'Sr', 'C(4)', 'year')) |>
+    group_by(year) |>
+    mutate(avg_calcite = ifelse(soln %in% 1:10, mean(Calcite[soln %in% 1:10]), Calcite)) |> # Getting the average value for Calcite
+    ungroup() |>
+    # Conversions from mole/liter to CO2/Ha
+    mutate(Calcite = avg_calcite,
+           Calcite = Calcite * 500000 * 44 / 1000000 / ifelse(soln %in% 1:10, 1, 10),
+           `C(4)` = `C(4)` * 500000 * 44 / 1000000 / 10,
+           file_id = file_id, 
+           mineral = mineral, 
+           coefficient = coefficient) |>
+    select(-avg_calcite)
+  return(data)
+}
+```
+
+\newpage
+
+Now that we have this function to process the files, let's read and
+combine all the files we have
+
+```{r, echo = TRUE}
+# Seting the base path for alljobs directory 
+base_path <- "../Data/alljobs" 
+
+# Getting all the simulation folders from the base directory 
+folders <- list.dirs(path = base_path, full.names = TRUE, recursive = FALSE)
+
+all_data <- list()
+
+file_counter <- 1
+
+for (folder in folders) {
+  # Adjust the pattern to match your .out files, if they have a specific naming convention
+  file_paths <- list.files(path = folder, full.names = TRUE, pattern = "*.out$")
+  data <- process_file(file_paths, file_counter)
+  all_data <- bind_rows(all_data, data)
+  file_counter <- file_counter + 1
+}
+
+head(all_data)
+```
+
+```{r}
+write.csv(all_data, "./all_data.csv")
+```
