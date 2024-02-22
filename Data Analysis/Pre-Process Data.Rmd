@@ -30,7 +30,9 @@ between 1 to 10) \newline - Convert the values mole/liter to ton CO2/Ha
 process_file <- function(file, file_id){
   file_number <- str_extract(file, "(?<=/)[^/]+(?=\\.out$)") # Extracting the file number
   
-  mineral <- str_extract(file, "(?<=job\\d+_)[A-Za-z]+(?=_\\d+/Beerling_orignal\\.out)")
+  mineral_pattern <- "job\\d+_([A-Za-z]+)_\\d+/Beerling_orignal\\.out"
+  mineral <- str_match(file, mineral_pattern)[,2]
+
   coefficients <- c(0.01, 0.1, 1, 10, 100)
   
   coefficient_index <- ((file_id - 1) %% length(coefficients)) + 1
