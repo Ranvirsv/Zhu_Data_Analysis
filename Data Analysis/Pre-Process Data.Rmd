@@ -10,6 +10,7 @@ editor_options:
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 library(stringr)
+library(dplyr)
 ```
 
 ## Loading and joining the data
@@ -26,44 +27,55 @@ between 1 to 10) \newline - Convert the values mole/liter to ton CO2/Ha
 \newline
 
 ```{r, echo = TRUE}
-# Create a funtion to prepocess and join all the files
-process_file <- function(file, file_id){
-  file_number <- str_extract(file, "(?<=/)[^/]+(?=\\.out$)") # Extracting the file number
+process_file <- function(file, file_id) {
+  # Extract the file number
+  file_number <- str_extract(file, "(?<=/)[^/]+(?=\\.out$)")
   
+  # Define temperatures and shifts
   temperatures <- seq(5, 40, 5)
   shifts <- seq(100, 550, 50)
   
-  total_combinations <- length(temperatures) * length(shifts)
+  # Calculate the index for temp and shift based on file_id
+  files_per_temp_shift_cycle <- 55 # Each temp and shift value repeats for 55 files
+  temp_shift_cycles <- length(temperatures) * length(shifts)
   
-  temp = temperatures[((file_id - 1) / length(shifts)) %% length(temperatures) + 1]
-  shift = shifts[((file_id - 1) %% length(shifts)) + 1]
+  # Calculate temp and shift based on file_id
+  cycle_num <- (file_id - 1) %/% files_per_temp_shift_cycle
+  temp_index <- cycle_num %/% length(shifts) %% length(temperatures) + 1
+  shift_index <- cycle_num %% length(shifts) + 1
   
+  temp <- temperatures[temp_index]
+  shift <- shifts[shift_index]
+  
+  # Extract mineral from file path
   mineral_pattern <- "job\\d+_([A-Za-z]+)_\\d+/Beerling_orignal\\.out"
-  mineral <- str_match(file, mineral_pattern)[,2]
-
+  mineral <- str_match(file, mineral_pattern)[, 2]
+  
+  # Define coefficients
   coefficients <- c(0.01, 0.1, 1, 10, 100)
   
+  # Calculate coefficient index
   coefficient_index <- ((file_id - 1) %% length(coefficients)) + 1
   coefficient <- coefficients[coefficient_index]
   
-  data <- read.table(file, header = TRUE) |>
-    filter(state == "transp") |> # Get the files which have state as transp
-    mutate(year = time/(3600*24*365)) |> # Convert form sec to year
-    rename(`C(4)` = "C.4.") |> 
-    select(c('soln', 'Calcite', 'Sr', 'C(4)', 'year')) |>
-    group_by(year) |>
-    mutate(avg_calcite = ifelse(soln %in% 1:10, mean(Calcite[soln %in% 1:10]), Calcite)) |> # Getting the average value for Calcite
-    ungroup() |>
-    # Conversions from mole/liter to CO2/Ha
-    mutate(Calcite = avg_calcite,
-           Calcite = Calcite * 500000 * 44 / 1000000 / ifelse(soln %in% 1:10, 1, 10),
+  # Read and process the file
+  data <- read.table(file, header = TRUE) %>%
+    filter(state == "transp") %>%
+    mutate(year = time / (3600 * 24 * 365)) %>%
+    rename(`C(4)` = "C.4.") %>%
+    select(c('soln', 'Calcite', 'Sr', 'C(4)', 'year')) %>%
+    group_by(year) %>%
+    mutate(avg_calcite = ifelse(soln %in% 1:10, mean(Calcite[soln %in% 1:10]), Calcite)) %>%
+    ungroup() %>%
+    mutate(Calcite = avg_calcite * 500000 * 44 / 1000000 / ifelse(soln %in% 1:10, 1, 10),
            `C(4)` = `C(4)` * 500000 * 44 / 1000000 / 10,
            file_id = file_id, 
            temp = temp,
-           shift = shift
+           shift = shift,
            mineral = mineral, 
-           coefficient = coefficient) |>
+           coefficient = coefficient) %>%
     select(-avg_calcite)
+  
   return(data)
 }
 ```
@@ -99,6 +111,4 @@ head(all_data)
 write.csv(all_data, "./all_data.csv")
 ```
 
-```{r}
-```
 
