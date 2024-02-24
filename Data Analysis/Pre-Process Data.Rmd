@@ -30,6 +30,14 @@ between 1 to 10) \newline - Convert the values mole/liter to ton CO2/Ha
 process_file <- function(file, file_id){
   file_number <- str_extract(file, "(?<=/)[^/]+(?=\\.out$)") # Extracting the file number
   
+  temperatures <- seq(5, 40, 5)
+  shifts <- seq(100, 550, 50)
+  
+  total_combinations <- length(temperatures) * length(shifts)
+  
+  temp = temperatures[((file_id - 1) / length(shifts)) %% length(temperatures) + 1]
+  shift = shifts[((file_id - 1) %% length(shifts)) + 1]
+  
   mineral_pattern <- "job\\d+_([A-Za-z]+)_\\d+/Beerling_orignal\\.out"
   mineral <- str_match(file, mineral_pattern)[,2]
 
@@ -41,7 +49,7 @@ process_file <- function(file, file_id){
   data <- read.table(file, header = TRUE) |>
     filter(state == "transp") |> # Get the files which have state as transp
     mutate(year = time/(3600*24*365)) |> # Convert form sec to year
-    rename(`C(4)` = "C.4.") |>
+    rename(`C(4)` = "C.4.") |> 
     select(c('soln', 'Calcite', 'Sr', 'C(4)', 'year')) |>
     group_by(year) |>
     mutate(avg_calcite = ifelse(soln %in% 1:10, mean(Calcite[soln %in% 1:10]), Calcite)) |> # Getting the average value for Calcite
@@ -51,6 +59,8 @@ process_file <- function(file, file_id){
            Calcite = Calcite * 500000 * 44 / 1000000 / ifelse(soln %in% 1:10, 1, 10),
            `C(4)` = `C(4)` * 500000 * 44 / 1000000 / 10,
            file_id = file_id, 
+           temp = temp,
+           shift = shift
            mineral = mineral, 
            coefficient = coefficient) |>
     select(-avg_calcite)
@@ -88,3 +98,7 @@ head(all_data)
 ```{r}
 write.csv(all_data, "./all_data.csv")
 ```
+
+```{r}
+```
+
