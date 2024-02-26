@@ -1,0 +1,52 @@
+---
+title: "Data_Analysis_6930"
+output: pdf_document
+date: "2024-02-26"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+## Correlation
+
+```{r fig.width=14, fig.height=12}
+corelation_data <- merge(selected_data, total_capture, by = c("year", "file_id")) |>
+  mutate(Mineral = as.factor(Mineral)) |>
+  select(c("Total_CO2_capture", "Mineral", "Coefficient", "temp", "shift", "year"))
+
+numeric_cor_data <- corelation_data |> select(-Mineral)
+
+ggpairs(corelation_data)
+```
+
+```{r}
+nrow(corelation_data)
+sample_cor_data <- corelation_data[sample(1:nrow(corelation_data), 6556863),]
+write.csv(sample_cor_data, "./corelation_data.csv")
+```
+
+## Interactions
+
+Since the data is too big, let's use specific packages for effective use of memory
+```{r}
+corelation_data <- as.data.table(corelation_data)
+```
+
+Let's try to preform some interactions to get a better look at the relation between variables
+
+### Linear Regression:
+
+
+```{r}
+temp.year.fit <- glm(Total_CO2_capture ~ temp * year, data = corelation_data)
+summ(temp.year.fit)
+```
+
+```{r}
+
+mineral.coef.fit <- biglm(Total_CO2_capture ~ Mineral + Coefficient, data = corelation_data)
+summary(mineral.coef.fit)
+```
+
