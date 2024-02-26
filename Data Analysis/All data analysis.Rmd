@@ -20,6 +20,12 @@ library(dplyr)
 library(readr)
 library(patchwork)
 library(gridExtra)
+library(ClusterR)
+library(factoextra)
+library(corrplot)
+library(jtools)
+library(data.table)
+library(biglm)
 ```
 
 ## Loading data
@@ -27,13 +33,35 @@ library(gridExtra)
 ```{r, echo = TRUE}
 # So let's get the data where the soln value is 11
 # We remove the Sr column as we do not need the Sr data for total CO2 caputre data. 
-all_data <- read.csv("../Data/all_data.csv", header = TRUE)
+all_data <- read.csv("../Data/All Data.csv", header = TRUE)
 
 ## The 7000 file csv requires some more cleaning
 all_data = all_data |>
   rename(`C(4)` = "C.4.") |>
   dplyr::select(-"X")
 ```
+
+```{r}
+temperatures <- seq(5, 40, 5)
+shifts <- seq(100, 550, 50)
+
+files_per_group <- 55
+
+# Calculate total cycles for shift before temp changes
+shift_cycles <- length(shifts)
+
+
+all_data <- all_data %>%
+mutate(
+  cycle_index = (file_id - 1) %/% files_per_group,
+  temp_index = cycle_index %/% shift_cycles,
+  shift_index = cycle_index %% shift_cycles,
+  temp = temperatures[temp_index %% length(temperatures) + 1],
+  shift = shifts[shift_index + 1]
+) %>%
+select(-cycle_index, -temp_index, -shift_index)
+```
+
 
 ## EDA
 
@@ -47,22 +75,32 @@ cat(
   nrow(all_data),
   "\n"
 )
+
+cat(
+  "Number of Parameters in data:",
+  ncol(all_data),
+  "\n"
+)
+
 completed_sim <- all_data[all_data$year >= 5, ]
+file_id_5ys <- unique(completed_sim$file_id)
+completed_sim_data <- all_data[all_data$file_id %in% file_id_5ys, ]
+
 cat(
   "Number of simulations that ran for all 5 years:", 
   nrow(completed_sim),
   "\n"
 )
+
 four_year_sim <- all_data[all_data$year >=4, ]
+file_id_4ys <- unique(four_year_sim$file_id)
+four_year_data <- all_data[all_data$file_id %in% file_id_4ys, ]
+
 cat(
   "Number of simulations that ran for over 4 years:",
   nrow(four_year_sim),
   "\n"
 )
-```
-
-```{r}
-incomplete_data <- all_data[all_data$year < 4, ]
 ```
 
 ## Get the data for Total CO2 Capture
@@ -72,15 +110,28 @@ total_capture and the data where the value for soln = 11 \newline The
 Calcite and soln_11_data will help us get the total_capture data
 required for the Total_CO2_Capture graphs.
 
+Let's set a data we will be using throughout the analysis:
 ```{r}
-soln_11_data <- all_data |>
+# Let's test for completed data
+selected_data <- completed_sim_data
+cat(
+  "Rows in selected Data:",
+  nrow(selected_data),
+  "\nPercentage of orignal data", 
+  nrow(selected_data)/nrow(all_data) * 100
+)
+```
+
+
+```{r}
+soln_11_data <- selected_data |>
   filter(soln == 11) |>
   group_by(file_id)|>
   mutate(`C(4)` = cumsum(`C(4)`)) |>
   ungroup()|>
   dplyr::select(-"Sr")
 
-calcite <- all_data |>
+calcite <- selected_data |>
   filter(soln %in% 1:10) |>
   dplyr::select(-"Sr")
 
@@ -125,25 +176,14 @@ p1 <- ggplot(total_capture, aes(x = year, y = Total_CO2_capture, group = file_id
        y = "Total CO2 Capture (tonnes CO2/ha)") +
   theme_minimal() +
   theme(legend.position = "none")  # Remove legend
+# 
+# selected_file_ids <- seq(1, 6930, by = 10)
+# 
+# # Filter the data for the selected file IDs
+# selected_data <- total_capture %>%
+#   filter(file_id %in% selected_file_ids)
 
-selected_file_ids <- seq(1, 6930, by = 10)
-
-# Filter the data for the selected file IDs
-selected_data <- total_capture %>%
-  filter(file_id %in% selected_file_ids)
-
-# Plotting smoothed lines for selected files
-p2 <- ggplot(selected_data, aes(x = year, y = Total_CO2_capture, group = file_id)) +
-  geom_smooth(se = FALSE, method = "loess", span = 1) +   # Add smoothed trend lines
-  scale_color_viridis_d(option = "C") +          # Use a color scale that prints well in black and white
-  labs(title = "Total CO2 Capture Over Time for Selected Files",
-       x = "Year",
-       y = "Total CO2 Capture (tonnes CO2/ha)",
-       color = "File ID") +
-  scale_color_viridis_d() +
-  theme_minimal()
-
-p2
+p1
 ```
 
 We can see a trend where the Total CO2 Capture is increasing rapidly for
@@ -197,6 +237,7 @@ between CO2 Capture and Mean Soil Calcite
 We need to group these files on similarity and get the mean values of
 those groups. \newline
 
+
 #### K-Means
 
 We can use the clustering techniques, cluster refers to a collection of
@@ -238,11 +279,11 @@ Now let's take a look at the plot we get from this:
 
 ```{r}
 elbow_plot <- data.frame(k = 1:10, wcss = wcss)
-ggplot(elbow_plot, aes(x = k, y = wcss), bins = 10) + 
-  geom_point() + 
-  geom_line() + 
-  labs(title = "Elbow Method for  Optimal k", 
-       x = "Number of clusters (k)", 
+ggplot(elbow_plot, aes(x = k, y = wcss), bins = 10) +
+  geom_point() +
+  geom_line() +
+  labs(title = "Elbow Method for  Optimal k",
+       x = "Number of clusters (k)",
        y = "Total Within-Cluster Sum of Squares (WCSS)")
 ```
 
@@ -252,22 +293,22 @@ the value of K.
 ```{r, fig.height=14, fig.width=12}
 # set.seed(123) # for reproducibility
 
-clusters <- kmeans(data_for_clustering, centers = 4)
-# 
+clusters <- kmeans(data_for_clustering, centers = 6)
+#
 # Assign cluster labels back to the file_id
 kmean_total_caputer <- total_capture %>%
   mutate(group = as.factor(clusters$cluster[match(file_id, data_for_clustering$file_id)]))
 
-## Now that we have the clusters, let's get the mean for those groups 
+## Now that we have the clusters, let's get the mean for those groups
 
 group_mean <- kmean_total_caputer |>
   group_by(year, group) |>
   summarize(mean_CO2 = mean(Total_CO2_capture, na.rm = TRUE), .groups = 'drop')
 
 plot.k.means.facet <- ggplot() +
-  geom_line(data = kmean_total_caputer, aes(x = year, y = Total_CO2_capture, group = file_id, color = group), alpha = 0.2) +  
-  geom_smooth(data = group_mean, aes(x = year, y = mean_CO2, group = group, color = group), size = 1.5) + 
-  facet_wrap( ~ group) + 
+  geom_line(data = kmean_total_caputer, aes(x = year, y = Total_CO2_capture, group = file_id, color = group), alpha = 0.2) +
+  geom_smooth(data = group_mean, aes(x = year, y = mean_CO2, group = group, color = group), size = 1.5) +
+  facet_wrap( ~ group) +
   labs(title = "Total CO2 Capture group vise facet",
        x = "Year",
        y = "Total CO2 Capture (tonnes CO2/ha)") +
@@ -275,23 +316,49 @@ plot.k.means.facet <- ggplot() +
   theme(legend.position = "bottom")
 
 plot.k.means <- ggplot() +
-  geom_line(data = kmean_total_caputer, aes(x = year, y = Total_CO2_capture, group = file_id, color = group), alpha = 0.3) +
-  labs(title = "Total CO2 Capture group vise",
-       x = "Year",
-       y = "Total CO2 Capture (tonnes CO2/ha)") +
-  theme_minimal() +
-  theme(legend.position = "none")
-
-plot.all <- ggplot() +
-  geom_smooth(data = group_mean, aes(x = year, y = mean_CO2, group = group, color = group), level = 0.95) + 
+  geom_smooth(data = group_mean, aes(x = year, y = mean_CO2, group = group, color = group), level = 0.95) +
   labs(title = "Mean CO2 Capture group vise",
        x = "Year",
        y = "Mean CO2 Capture (tonnes CO2/ha)") +
   theme_minimal() +
   theme(legend.position = "none")
 
-plot.k.means.facet / (plot.k.means + plot.all)
+plot.k.means.facet / plot.k.means
 ```
+
+
+
+#### Min-Batch K-means
+
+Like K-means, Min-Batch K-means clustering also uses centroid to then group the data according to the distance from those centroid. But as the name suggests, it **preforms it in Batches**, increasing the speed of the algorithm and also makeing it more effective for larger data such as here. The main advantage of this algorithm is to **reduce the computational cost** by not using all the dataset each iteration but a subsample of a fixed size.
+
+```{r}
+data_for_clustering <- total_capture[, c("Total_CO2_capture", "file_id")]
+kmean_total_caputer <- total_capture |>
+  mutate(group = as.factor(clusters$cluster[match(file_id, data_for_clustering$file_id)]))
+```
+
+
+```{r}
+sample_df <- total_capture[sample(1:nrow(total_capture), 10000),]
+
+# Use a loop to calculate total within-cluster sum of square
+fviz_nbclust(sample_df, kmeans, method = "wss") +
+  geom_vline(xintercept = 4, linetype = 2) +
+  labs(subtitle = "Elbow Method")
+```
+
+
+### Plot from Physical Groups
+
+We can also cluster the files based on their physical properties. That
+means using the values from columns **Solution**(2 distinct values) and
+**Temperature**(3 distinct values), we can get 6(2 x 3) different
+clusters.
+
+We can then take a look at the similarities between the k-means clusters
+and the physical clusters.
+
 
 Let's also take a look at the groups created by physical meaning
 \newpage
@@ -313,7 +380,7 @@ get_group <- function(file_id) {
   }
 }
 
-phy_groups <- readxl::read_excel("groups_by_phy_meaning.xlsx")[, -3] 
+phy_groups <- readxl::read_excel("groups_by_phy_meaning.xlsx")[, -3]
 phy_groups <- phy_groups |>
   mutate(group = sapply(file_id, get_group)) |>
   select(-"input_file")
@@ -324,16 +391,6 @@ phy_groups_mean <- phy_groups_total_capture |>
   group_by(year, group) |>
   summarize(meanCO2 = mean(Total_CO2_capture, na.rm = TRUE), .groups = "drop")
 ```
-
-### Plot from Physical Groups
-
-We can also cluster the files based on their physical properties. That
-means using the values from columns **Solution**(2 distinct values) and
-**Temperature**(3 distinct values), we can get 6(2 x 3) different
-clusters.
-
-We can then take a look at the similarities between the k-means clusters
-and the physical clusters.
 
 ```{r fig.width=12, fig.height=10}
 plot.phy.facet <- ggplot() +
@@ -427,12 +484,4 @@ important parameters for the prediction of the CO2 absorption levels.
 
 ```{r}
 write.csv(phy_groups_total_capture, "./phy_groups_total_capture.csv")
-```
-
-## Correlation
-
-```{r fig.width=14, fig.height=12}
-pair.data <- kmean_total_caputer |>
-  select(c("Total_CO2_capture", "year", "Solution", "temp", "shifts"))
-ggpairs(pair.data)
 ```
