@@ -1,0 +1,81 @@
+---
+title: "35k_file_analysis"
+output: pdf_document
+date: "2024-03-22"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(data.table)
+library(dplyr)
+library(parallel)
+```
+
+```{r}
+number_of_cores <- detectCores() - 2
+```
+
+
+## Loading the data 
+
+```{r}
+first_half <- fread("../Data/all_data_part1.csv")
+second_half <- fread("../Data/Zhu Labs Data part2.csv")
+job_summary <- read.csv("../Data/Job Summary.csv")
+```
+
+```{r}
+job_summary <- job_summary |>
+  dplyr::select(-c(input_file, time_step))
+job_summary$file_id <- seq_len(nrow(job_summary))
+```
+
+```{r}
+first_half <- as.data.table(first_half)
+```
+
+
+```{r}
+first_half <- first_half |>
+  select(-c(V1, avg_calcite))
+
+second_half <- second_half |>
+  select(-c(V1, avg_calcite))
+```
+
+```{r}
+get_co2_capture <- function(selected_data){
+  soln_11_data <- selected_data |>
+    filter(soln == 11) |>
+    group_by(file_id)|>
+    mutate(`C(4)` = cumsum(`C(4)`)) |>
+    ungroup()|>
+    dplyr::select(-"Sr")
+  
+  calcite <- selected_data |>
+    filter(soln %in% 1:10) |>
+    dplyr::select(-"Sr")
+  
+  # Now we can use the claclite and soln_11_data to create the total_capture data 
+  total_capture <- full_join(calcite, soln_11_data, by = c("year", "file_id"), suffix = c(".soil", ".effluent")) |>
+    mutate(Total_CO2_capture = Calcite.soil + `C(4).effluent` + Calcite.effluent) |>
+    filter(soln.soil == 1) |>
+    dplyr::select(c(Total_CO2_capture, year, file_id))
+  
+  return(total_capture)
+}
+
+```
+
+```{r}
+num_chunks <- 2 * detectCores()  
+chunks <- split(first_half, cut(seq(nrow(first_half)), num_chunks, labels = FALSE))
+results <- mclapply(chunks, get_co2_capture, mc.cores = number_of_cores)
+first_half <- bind_rows(results)
+
+chunks <- split(second_half, cut(seq(nrow(second_half)), num_chunks, labels = FALSE))
+results <- mclapply(chunks, get_co2_capture, mc.cores = number_of_cores)
+second_half <- bind_rows(results)
+```
+
+
