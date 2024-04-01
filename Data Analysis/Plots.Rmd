@@ -1,0 +1,213 @@
+---
+title: "Plots"
+output: pdf_document
+date: "2024-03-11"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+memory.limit()
+memory.limit(size = NA)
+library(dplyr)
+library(dtw)
+library(tidyverse)
+library(pheatmap)
+library(ClusterR)
+```
+
+```{r}
+total_capture <- read.csv("./total_capture.csv")
+job_sum <- read.csv("../Data/job_summary7k.csv")
+corelation_data <- read.csv("./corelation_data.csv")
+```
+
+```{r}
+job_sum$file_id <- seq_len(nrow(job_sum))
+```
+
+```{r}
+corelation_data <- merge(corelation_data, job_sum |> select(c("file_id", "base_file")))
+
+corelation_data$base_file <- as.factor(corelation_data$base_file)
+```
+
+## Quantiles
+
+```{r}
+quantiles_data <- total_capture %>%
+  group_by(year) %>%
+  summarize(
+    P10 = quantile(Total_CO2_capture, probs = 0.90, na.rm = TRUE),
+    P33 = quantile(Total_CO2_capture, probs = 0.67, na.rm = TRUE),
+    P50 = quantile(Total_CO2_capture, probs = 0.50, na.rm = TRUE),
+    P67 = quantile(Total_CO2_capture, probs = 0.33, na.rm = TRUE),
+    P90 = quantile(Total_CO2_capture, probs = 0.10, na.rm = TRUE)
+  ) %>%
+  ungroup() 
+```
+
+```{r, fig.height=15}
+# Apply spline smoothing to the quantile data
+quantiles_data$P10_spline <- predict(smooth.spline(x = quantiles_data$year, y = quantiles_data$P10), quantiles_data$year)$y
+quantiles_data$P33_spline <- predict(smooth.spline(x = quantiles_data$year, y = quantiles_data$P33), quantiles_data$year)$y
+quantiles_data$P67_spline <- predict(smooth.spline(x = quantiles_data$year, y = quantiles_data$P67), quantiles_data$year)$y
+quantiles_data$P90_spline <- predict(smooth.spline(x = quantiles_data$year, y = quantiles_data$P90), quantiles_data$year)$y
+quantiles_data$P50_spline <- predict(smooth.spline(x = quantiles_data$year, y = quantiles_data$P50), quantiles_data$year)$y
+
+# Plotting using spline-smoothed quantiles
+ggplot(data = quantiles_data, aes(x = year)) +
+  geom_ribbon(aes(ymin = P33_spline, ymax = P67_spline, fill = "67% Confidence Interval"), alpha = 0.3) +
+  geom_ribbon(aes(ymin = P10_spline, ymax = P90_spline, fill = "90% Confidence Interval"), alpha = 0.2) +
+  geom_line(aes(y = P50_spline, color = "Median"), size=1.5) +
+  scale_fill_manual("Confidence Intervals",
+                    values = c("67% Confidence Interval" = "orange", "90% Confidence Interval" = "purple")) +
+  scale_color_manual("Median Line",
+                     values = c("Median" = "blue")) +
+  labs(title = "Total CO2 Capture Over Time with Smoothed Percentile Ranges",
+       x = "Year",
+       y = "CO2 Capture") +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+```
+
+```{r}
+ggplot(data = quantiles_data, aes(x = year)) +
+  geom_line(aes(y = P67_spline, color = "P67")) +
+  geom_line(aes(y = P90_spline, color = "P90")) +
+  geom_line(aes(y = P50_spline, color = "P50")) +
+  scale_color_manual("Probability", values = c("P50" = "blue", "P67" = "orange", "P90" = "red")) +
+  labs(title = "Total CO2 Capture Over Time with Smoothed Percentile Ranges",
+       x = "Year",
+       y = "CO2 Capture") +
+  theme_minimal() + 
+  theme(legend.position = "right")
+```
+
+## Realtionship Analysis
+
+Let's preform a plot analysis to check if we can see any relations between the parameters and Total_CO2_capture
+
+```{r, fig.height=35, fig.width=17}
+ggplot(data = corelation_data) +
+  geom_line(aes(x = year, y = Total_CO2_capture, group = file_id, color = "blue")) +
+  facet_wrap(Mineral ~ Coefficient) + 
+  theme_minimal() + 
+  labs(title = 'Relationship between Minerals Coefficients and Total CO2 Capture',
+       x = 'Mineral Coefficient',
+       y = 'Total CO2 Capture') +
+  theme(strip.text.x = element_text(size = 10),  # Adjusting facet label size for readability
+        axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+## Senstivity Analysis
+
+Let's also try to do some senstivity analysis.
+
+```{r}
+top_data <- corelation_data |>
+  filter(year >= 5, Total_CO2_capture >= 3.5)
+
+top_data <- corelation_data[corelation_data$file_id %in% top_data$file_id, ]
+```
+
+```{r}
+ggplot(data = top_data) +
+  geom_line(aes(x = year, y = Total_CO2_capture, group = file_id)) +
+  theme_minimal() + 
+  labs(title = 'Relationship between Minerals Coefficients and Total CO2 Capture',
+       x = 'Mineral Coefficient',
+       y = 'Total CO2 Capture') +
+  theme(strip.text.x = element_text(size = 10),  # Adjusting facet label size for readability
+        axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+```{r, fig.height=35, fig.width=17}
+ggplot(data = top_data) +
+  geom_line(aes(x = year, y = Total_CO2_capture, group = file_id)) +
+  facet_wrap(Mineral ~ Coefficient) + 
+  theme_minimal() + 
+  labs(title = 'Relationship between Minerals Coefficients and Total CO2 Capture',
+       x = 'Mineral Coefficient',
+       y = 'Total CO2 Capture') +
+  theme(strip.text.x = element_text(size = 10),  # Adjusting facet label size for readability
+        axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+```{r}
+ggplot(data = corelation_data |> filter(Mineral == "Olivine", Coefficient == 10)) +
+  geom_line(aes(x = year, y = Total_CO2_capture, group = file_id)) +
+  facet_wrap( ~ base_file) +
+  theme_minimal() + 
+  labs(title = 'Relationship between Minerals Coefficients and Total CO2 Capture',
+       x = 'Mineral Coefficient',
+       y = 'Total CO2 Capture') +
+  theme(strip.text.x = element_text(size = 10),  # Adjusting facet label size for readability
+        axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+```{r}
+ggplot(data = top_data |> filter(Mineral == "Olivine", Coefficient == 10)) +
+  geom_line(aes(x = year, y = Total_CO2_capture, group = file_id)) +
+  facet_wrap( ~ base_file) +
+  theme_minimal() + 
+  labs(title = 'Relationship between Minerals Coefficients and Total CO2 Capture',
+       x = 'Mineral Coefficient',
+       y = 'Total CO2 Capture') +
+  theme(strip.text.x = element_text(size = 10),  # Adjusting facet label size for readability
+        axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+## Clustering Analysis
+
+```{r, echo = TRUE}
+temp_data <- top_data |>
+  filter(Mineral == "Olivine", Coefficient == 10)
+  
+temp_data <- mutate(temp_data, id = paste(year, file_id, sep = "_"))
+
+data_for_clustering <- temp_data |> 
+  select(c("year", "Total_CO2_capture", "file_id"))
+```
+
+```{r, echo = TRUE}
+wcss <- sapply(1:10, function(k){
+  kmeans(data_for_clustering, centers = k)$tot.withinss
+})
+```
+
+Now let's take a look at the plot we get from this:
+
+```{r}
+elbow_plot <- data.frame(k = 1:10, wcss = wcss)
+ggplot(elbow_plot, aes(x = k, y = wcss), bins = 10) +
+  geom_point() +
+  geom_line() +
+  labs(title = "Elbow Method for  Optimal k",
+       x = "Number of clusters (k)",
+       y = "Total Within-Cluster Sum of Squares (WCSS)")
+```
+
+```{r}
+clusters <- kmeans(data_for_clustering, centers = 3)
+
+data_for_clustering <- mutate(data_for_clustering, id = paste(year, file_id, sep = "_"))
+
+kmean_corr.data <- temp_data |>
+  mutate(temp_data, group = as.factor(clusters$cluster[match(id, data_for_clustering$id)]))
+
+kmean.mean <- kmean_corr.data |>
+  group_by(year, group) |>
+  summarise(mean_co2 = mean(Total_CO2_capture, na.rm = TRUE), .groups = "drop")
+```
+
+
+```{r}
+ggplot(data = kmean_corr.data) + 
+  geom_path(aes(x = year, y = Total_CO2_capture, group = file_id, color = group)) +
+  labs(title = "Mean CO2 Capture group vise",
+       x = "Year",
+       y = "Mean CO2 Capture (tonnes CO2/ha)") +
+  theme_minimal() +
+  theme(legend.position = "left")
+```
+

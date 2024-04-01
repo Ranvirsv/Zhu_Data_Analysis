@@ -5,10 +5,18 @@ date: "2024-03-22"
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
 library(data.table)
+library(ggplot2)
 library(dplyr)
+library(tidyr)
+library(forecast)
 library(parallel)
+library(tidyverse)
+library(tsfeatures)
+library(factoextra)
+library(cluster)
+library(dtw)
 ```
 
 ```{r}
@@ -18,9 +26,10 @@ number_of_cores <- detectCores() - 2
 
 ## Loading the data 
 
-```{r}
-first_half <- fread("../Data/all_data_part1.csv")
-second_half <- fread("../Data/Zhu Labs Data part2.csv")
+Currently we will be doing our analysis on the first half of the data
+```{r, echo = TRUE}
+first_half <- fread("../Data/Zhu Lab First Half.csv")
+# second_half <- fread("../Data/Zhu Labs Data part2.csv")
 job_summary <- read.csv("../Data/Job Summary.csv")
 ```
 
@@ -31,51 +40,229 @@ job_summary$file_id <- seq_len(nrow(job_summary))
 ```
 
 ```{r}
-first_half <- as.data.table(first_half)
-```
-
-
-```{r}
 first_half <- first_half |>
-  select(-c(V1, avg_calcite))
+  select(-V1)
 
-second_half <- second_half |>
-  select(-c(V1, avg_calcite))
+# second_half <- second_half |>
+#   select(-V1)
+```
+
+Since we are only interested in the top preforming simulations, let's filter out the data; We are only considering data that: 
+- Has data for all 5 years
+- The final value for Total CO2 capture is over 3.5
+```{r, echo = TRUE}
+first_half.top_data <- first_half |> 
+  filter(year >= 5, Total_CO2_capture >= 3.5)
+
+first_half.top_data <- first_half[first_half$file_id %in% first_half.top_data$file_id]
+```
+
+Since the *first_half.top_data* is still somewhat of a huge dataset, we will need to sample it down for preforming some basic plots and analysis. 
+```{r, echo = TRUE}
+sample_first_half <- first_half.top_data[1:2000000, ]
+
+sample_first_half <- merge(sample_first_half, job_summary, by = "file_id", na.rm = TRUE)
+
+write.csv(sample_first_half, "35k_12_percent_data.csv")
+```
+
+## Plots
+
+
+Here is a plot for the time series for different file_id, we are using the *sampled data* accounting for a total of `r length(unique(sample_first_half$file_id))` unique simulations and `r nrow(sample_first_half)` rows
+
+```{r, fig.height= 12, fig.width=15}
+ggplot() + 
+  geom_line(data = sample_first_half, aes(x = year, y = Total_CO2_capture, group = file_id, color = file_id)) + 
+  labs(
+    xlab = "Time in Years", 
+    ylab = "Total CO2 capture",
+    title = "Total CO2 Capture over Time for Selected Simulations"
+  ) +
+  theme_minimal()
+```
+
+### Quantiles
+
+Let's also take a look over the acutal range of this data we have, we will use the entier Top Preforming simulation from the first half of the simulations for this task. 
+
+```{r}
+first_half.top_data.quantile_data <- first_half.top_data |>
+  group_by(year) |>
+  summarise(
+    P10 = quantile(Total_CO2_capture, prob=0.90, na.rm=TRUE), 
+    P33 = quantile(Total_CO2_capture, prob=0.66, na.rm=TRUE),
+    P50 = quantile(Total_CO2_capture, prob=0.50, na.rm=TRUE),
+    P67 = quantile(Total_CO2_capture, prob=0.33, na.rm=TRUE),
+    P90 = quantile(Total_CO2_capture, prob=0.10, na.rm=TRUE)
+  ) |>
+  ungroup() |>
+  select(c("P10", "P33", "P50", "P67", "P90", "year"))
 ```
 
 ```{r}
-get_co2_capture <- function(selected_data){
-  soln_11_data <- selected_data |>
-    filter(soln == 11) |>
-    group_by(file_id)|>
-    mutate(`C(4)` = cumsum(`C(4)`)) |>
-    ungroup()|>
-    dplyr::select(-"Sr")
-  
-  calcite <- selected_data |>
-    filter(soln %in% 1:10) |>
-    dplyr::select(-"Sr")
-  
-  # Now we can use the claclite and soln_11_data to create the total_capture data 
-  total_capture <- full_join(calcite, soln_11_data, by = c("year", "file_id"), suffix = c(".soil", ".effluent")) |>
-    mutate(Total_CO2_capture = Calcite.soil + `C(4).effluent` + Calcite.effluent) |>
-    filter(soln.soil == 1) |>
-    dplyr::select(c(Total_CO2_capture, year, file_id))
-  
-  return(total_capture)
+## Smoothing out the qunitle data for better ploting
+
+percentiles <- c("P10", "P33", "P67", "P90", "P50")
+
+spline_predictions <- lapply(percentiles, function(pct) {
+  predict(smooth.spline(x = first_half.top_data.quantile_data$year, y = first_half.top_data.quantile_data[[pct]]), first_half.top_data.quantile_data$year)$y
+})
+
+names(spline_predictions) <- paste0(percentiles, "_spline") 
+
+for(i in 1:length(spline_predictions)) {
+  first_half.top_data.quantile_data[[names(spline_predictions)[i]]] <- spline_predictions[[i]]
 }
+```
 
+
+```{r fig.height= 12, fig.width=15}
+ggplot(data = first_half.top_data.quantile_data, aes(x = year)) + 
+  geom_ribbon(aes(ymin = P33_spline, ymax = P67_spline, fill = "67% Confidence Interval"), alpha = 0.3) +
+  geom_ribbon(aes(ymin = P10_spline, ymax = P90_spline, fill = "90% Confidence Interval"), alpha = 0.2) +
+  geom_line(aes(y = P50_spline, color = "Median"), size=1.5) +
+  scale_fill_manual("Confidence Intervals",
+                    values = c("67% Confidence Interval" = "orange", "90% Confidence Interval" = "purple")) +
+  scale_color_manual("Median Line",
+                     values = c("Median" = "blue")) +
+  labs(
+    title = "Confidence Intervals for Top data for first half of the 35k simulations", 
+    x = "Year", 
+    y = "CO2 Capture", 
+    color = "Probability"
+  ) + 
+  theme_minimal()
 ```
 
 ```{r}
-num_chunks <- 2 * detectCores()  
-chunks <- split(first_half, cut(seq(nrow(first_half)), num_chunks, labels = FALSE))
-results <- mclapply(chunks, get_co2_capture, mc.cores = number_of_cores)
-first_half <- bind_rows(results)
-
-chunks <- split(second_half, cut(seq(nrow(second_half)), num_chunks, labels = FALSE))
-results <- mclapply(chunks, get_co2_capture, mc.cores = number_of_cores)
-second_half <- bind_rows(results)
+ggplot(data = first_half.top_data.quantile_data, aes(x = year)) +
+  geom_line(aes(y = P67_spline, color = "P67")) +
+  geom_line(aes(y = P90_spline, color = "P90")) +
+  geom_line(aes(y = P50_spline, color = "P50")) +
+  scale_color_manual("Probability", values = c("P50" = "blue", "P67" = "orange", "P90" = "red")) +
+  labs(title = "Total CO2 Capture Over Time with Smoothed Percentile Ranges",
+       x = "Year",
+       y = "CO2 Capture") +
+  theme_minimal() + 
+  theme(legend.position = "right")
 ```
+
+### ACF, CCF
+
+Since we can see some cyclic repersentation in the data, let's take a look at tha acf and ccf for a better look 
+
+```{r}
+selected_data <- first_half.top_data |> filter(file_id == 1823)
+selected_data.TCC <- selected_data |> filter(soln == 1)
+
+ggAcf(selected_data.TCC$Total_CO2_capture, main = "Autocorrelation for Total CO2 capture")
+ggAcf(selected_data$Calcite, main = "Autocorrelation for Calcite")
+ggAcf(selected_data$`C(4)`, main = "Autocorrelation for C(4)")
+```
+```{r}
+ccf_data <- ccf(selected_data.TCC$Total_CO2_capture, selected_data$Calcite, plot = FALSE)
+ccf_df <- data.frame(lag = ccf_data$lag, acf = ccf_data$acf)
+ggplot(ccf_df, aes(x = lag, y = acf)) + geom_bar(stat="identity") + labs(title = "Cross-correlation between Total CO2 Capture and Calcite")
+```
+
+```{r}
+ccf_data_c4 <- ccf(selected_data.TCC$Total_CO2_capture, selected_data$`C(4)`, plot = FALSE)
+ccf_df_c4 <- data.frame(lag = ccf_data_c4$lag, acf = ccf_data_c4$acf)
+ggplot(ccf_df_c4, aes(x = lag, y = acf)) + geom_bar(stat="identity") + labs(title = "Cross-correlation between Total CO2 Capture and C(4)")
+```
+
+
+**Autocorrelation for Total CO2 Capture**
+The autocorrelation plot for Total CO2 Capture shows strong autocorrelation across all lagged values. This indicates a high level of persistence in the time series, where past CO2 capture levels are a good predictor of future levels. Such a time series is often referred to as 'non-stationary' because its statistical properties, such as mean and variance, are not constant over time.
+
+**Autocorrelation for C(4)**
+The autocorrelation plot for C(4) concentrations reveals a pattern that suggests possible periodicity or a repeating cycle in the time series. The alternating positive and negative lags indicate that the series oscillates over a fixed period, which could be of interest for further analysis to understand the underlying cycles in the mineral concentration data.
+
+**Autocorrelation for Calcite**
+The autocorrelation for Calcite also shows a significant autocorrelation at lag 0 (as expected since it's a correlation with itself), with some peaks at subsequent lags. However, the peaks are not as pronounced or as regular as those for C(4), which may suggest less periodicity in the Calcite concentration data compared to C(4).
+
+**Cross-correlation between Total CO2 Capture and Calcite**
+The cross-correlation plot between Total CO2 Capture and Calcite indicates that there are multiple time points where the correlation peaks, suggesting a relationship between the two variables. The symmetrical nature of the plot around lag 0 suggests that as one series peaks, the other series tends to peak at the same time or shortly after.
+
+**Cross-correlation between Total CO2 Capture and C(4)**
+The cross-correlation plot between Total CO2 Capture and C(4) shows a consistent level of correlation across the lags, indicating a strong relationship between these two variables. The uniformity across lags suggests that any shifts in C(4) concentrations are consistently related to shifts in Total CO2 Capture.
+
+**Conclusions from the Analysis:**
+- The Total CO2 Capture time series data appears to have a strong internal consistency, with current values heavily influenced by past values.
+- Both C(4) and Calcite show some degree of periodic behavior, with C(4) showing a more defined cycle. This could be indicative of underlying processes or seasonal effects influencing these concentrations.
+- There is a significant relationship between the concentrations of Calcite and C(4) and Total CO2 Capture, which supports the hypothesis that these mineral concentrations are important predictors of CO2 capture.
+
+
+## Clustering Analysis
+
+```{r}
+## Clustering Time Series
+first_half.top_data.clustered <- first_half.top_data
+
+ts_data <- first_half.top_data.clustered |>
+  group_by(file_id) |>
+  summarise(ts = list(Total_CO2_capture)) |>
+  pull(ts)
+
+ts_features <- tsfeatures(ts_data, c("acf_features", "entropy", "stl_features"))
+
+# Since the actual feature calculation is complex, let's simplify by using only ACF features
+ts_features <- tsfeatures(ts_data, "acf_features")
+
+ts_features.scaled <- scale(ts_features)
+```
+
+```{r}
+wcss <- sapply(1:20, function(k){
+  kmeans(ts_features.scaled, centers = k)$tot.withinss
+})
+```
+
+```{r}
+elbow_plot <- data.frame(k = 1:20, wcss = wcss)
+ggplot(elbow_plot, aes(x = k, y = wcss), bins = 20) +
+  geom_point() +
+  geom_line() +
+  labs(title = "Elbow Method for  Optimal k",
+       x = "Number of clusters (k)",
+       y = "Total Within-Cluster Sum of Squares (WCSS)")
+```
+
+```{r}
+set.seed(123)
+
+number_of_clusters <- 10
+kmeans_result <- kmeans(ts_features.scaled, centers = number_of_clusters)
+
+cluster_assignments <- kmeans_result$cluster
+
+cluster_df <- data.frame(file_id = unique(first_half.top_data.clustered$file_id), cluster = cluster_assignments)
+
+first_half.top_data.clustered <- first_half.top_data.clustered |>
+  left_join(cluster_df, by = "file_id")
+```
+
+```{r}
+ggplot(data = first_half.top_data.clustered) + 
+  geom_line(aes(x = year, y = Total_CO2_capture, group = file_id, color = cluster)) +
+  labs(title = "Mean CO2 Capture group vise",
+       x = "Year",
+       y = "Mean CO2 Capture (tonnes CO2/ha)") +
+  theme_minimal() +
+  theme(legend.position = "left")
+```
+
+
+```{r}
+## Clustering Input Variable
+input_variables_by_cluster <- first_half.top_data |>
+  select(c(temp, "base_file", shifts, multiplier, "surface_area"), cluster) %>%
+  group_by(cluster) %>%
+  summarise_all(mean)
+```
+
+
+
 
 

@@ -8,13 +8,18 @@ date: "2024-02-26"
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
+```{r}
+selected_data <- read.csv("./completed_sim.csv")
+```
+
 
 ## Correlation
 
 ```{r fig.width=14, fig.height=12}
 corelation_data <- merge(selected_data, total_capture, by = c("year", "file_id")) |>
   mutate(Mineral = as.factor(Mineral)) |>
-  select(c("Total_CO2_capture", "Mineral", "Coefficient", "temp", "shift", "year"))
+  filter(soln == 11) |>
+  select(c("Total_CO2_capture", "Mineral", "Coefficient", "temp", "shift", "year", "file_id"))
 
 numeric_cor_data <- corelation_data |> select(-Mineral)
 
